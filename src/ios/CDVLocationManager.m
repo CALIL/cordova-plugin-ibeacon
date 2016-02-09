@@ -109,7 +109,9 @@
 }
 
 -(void)locationManager:(CLLocationManager *)manager didEnterRegion:(CLRegion *)region {
-    
+    // App start in monitoring event when delay propagation
+    dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC));
+    dispatch_after(popTime, dispatch_get_main_queue(), ^{
     [self.queue addOperationWithBlock:^{
         
         [self _handleCallSafely:^CDVPluginResult *(CDVInvokedUrlCommand *command) {
@@ -127,10 +129,13 @@
 
         } :nil :NO :self.delegateCallbackId];
     }];
+    });
 }
 
 -(void)locationManager:(CLLocationManager *)manager didExitRegion:(CLRegion *)region {
-
+    // App start in monitoring event when delay propagation
+    dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC));
+    dispatch_after(popTime, dispatch_get_main_queue(), ^{
     [self.queue addOperationWithBlock:^{
         
         [self _handleCallSafely:^CDVPluginResult *(CDVInvokedUrlCommand *command) {
@@ -148,6 +153,7 @@
             
         } :nil :NO :self.delegateCallbackId];
     }];
+    });
 }
 
 - (void)locationManager:(CLLocationManager *)manager didStartMonitoringForRegion:(CLRegion *)region {
