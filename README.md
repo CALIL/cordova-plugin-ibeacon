@@ -1,5 +1,7 @@
-このリポジトリは、Android向けのAltBeaconライブラリを最新版にアップデートするために作成したものです。
+This repository has the following changes.
 
+- Update 'AltBeacon' Library
+- Fix of monitoring events
 
 <!---
  license: Licensed to the Apache Software Foundation (ASF) under one
