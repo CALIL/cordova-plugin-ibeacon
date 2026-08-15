@@ -30,16 +30,13 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Handler;
-import android.os.RemoteException;
 import android.util.Log;
 
 import org.altbeacon.beacon.Beacon;
-import org.altbeacon.beacon.BeaconConsumer;
 import org.altbeacon.beacon.BeaconManager;
 import org.altbeacon.beacon.BeaconParser;
 
@@ -74,8 +71,20 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.List;
 
+/*
+ サービスへの束縛は android-beacon-library に任せている（autobind）。
+
+ 2.19 で BeaconConsumer / bind() / unbind() が非推奨になり、公式の移行ガイドは
+ **「Do not mix old binding methods with new autobind methods」**と明記している。
+ それでも 2.19 では手動 bind が動いていたため、このファイルは長く旧 API のままだった。
+
+ 2.20 以降でそれが実際に壊れ、**ranging のコールバックは毎秒来るのに結果が常に空**
+ という形で表面化した（例外も警告も出ない）。2026-08-15 に autobind へ移行。
+
+ → https://altbeacon.github.io/android-beacon-library/autobind.html
+ */
 @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
-public class LocationManager extends CordovaPlugin implements BeaconConsumer {
+public class LocationManager extends CordovaPlugin {
 
     public static final String TAG = "com.unarin.beacon";
     private static final int PERMISSION_REQUEST = 1;
@@ -185,8 +194,8 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
      */
     @Override
     public void onDestroy() {
-        iBeaconManager.unbind(this);
-
+        // unbind は要らない。autobind では、測距・監視をやめた時点で
+        // ライブラリが自分でサービスを畳む
         if (broadcastReceiver != null) {
             cordova.getActivity().unregisterReceiver(broadcastReceiver);
             broadcastReceiver = null;
@@ -268,8 +277,14 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
     ///////////////// SETUP AND VALIDATION /////////////////////////////////
 
     private void initLocationManager() {
+        /*
+         iBeacon のレイアウトを登録する。**これが無いと1本も検出しない。**
+         android-beacon-library の既定は AltBeacon 形式で、iBeacon は含まれない。
+
+         bind() はしない（autobind）。最初の startRangingBeacons / startMonitoring で
+         ライブラリが束縛するので、それより前にパーサを足せていれば足りる。
+         */
         iBeaconManager.getBeaconParsers().add(new BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24"));
-        iBeaconManager.bind(this);
     }
 
     private BeaconTransmitter createOrGetBeaconTransmitter() {
@@ -517,8 +532,18 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
 
     private void createMonitorCallbacks(final CallbackContext callbackContext) {
 
-        //Monitor callbacks
-        iBeaconManager.setMonitorNotifier(new MonitorNotifier() {
+        /*
+         Monitor callbacks
+
+         setMonitorNotifier は非推奨。中身は「全部消してから足す」なので、
+         addMonitorNotifier の前に removeAllMonitorNotifiers を呼んで意味を揃える。
+
+         **単純に add へ置き換えてはいけない。** このメソッドは JS から呼べる
+         registerDelegateCallbackId 経由なので複数回走りうる。積み上がると
+         コールバックが二重・三重に飛ぶ。
+         */
+        iBeaconManager.removeAllMonitorNotifiers();
+        iBeaconManager.addMonitorNotifier(new MonitorNotifier() {
             @Override
             public void didEnterRegion(Region region) {
                 debugLog("didEnterRegion INSIDE for " + region.getUniqueId());
@@ -570,7 +595,9 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
 
     private void createRangingCallbacks(final CallbackContext callbackContext) {
 
-        iBeaconManager.setRangeNotifier(new RangeNotifier() {
+        // setMonitorNotifier と同じ理由で remove してから add する（上のコメント参照）
+        iBeaconManager.removeAllRangeNotifiers();
+        iBeaconManager.addRangeNotifier(new RangeNotifier() {
             @Override
             public void didRangeBeaconsInRegion(final Collection<Beacon> iBeacons, final Region region) {
 
@@ -863,17 +890,15 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
                 Region region = null;
                 try {
                     region = parseRegion(arguments);
-                    iBeaconManager.startMonitoringBeaconsInRegion(region);
+                    iBeaconManager.startMonitoring(region);
 
                     PluginResult result = new PluginResult(PluginResult.Status.OK);
                     result.setKeepCallback(true);
                     beaconServiceNotifier.didStartMonitoringForRegion(region);
                     return result;
 
-                } catch (RemoteException e) {
-                    Log.e(TAG, "'startMonitoringForRegion' service error: " + e.getCause());
-                    beaconServiceNotifier.monitoringDidFailForRegion(region, e);
-                    return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
+                    // RemoteException の catch は外した。autobind の
+                    // startMonitoring / startRangingBeacons は投げない
                 } catch (Exception e) {
                     Log.e(TAG, "'startMonitoringForRegion' exception " + e.getCause());
                     beaconServiceNotifier.monitoringDidFailForRegion(region, e);
@@ -894,15 +919,12 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
 
                 try {
                     Region region = parseRegion(arguments);
-                    iBeaconManager.stopMonitoringBeaconsInRegion(region);
+                    iBeaconManager.stopMonitoring(region);
 
                     PluginResult result = new PluginResult(PluginResult.Status.OK);
                     result.setKeepCallback(true);
                     return result;
 
-                } catch (RemoteException e) {
-                    Log.e(TAG, "'stopMonitoringForRegion' service error: " + e.getCause());
-                    return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
                 } catch (Exception e) {
                     Log.e(TAG, "'stopMonitoringForRegion' exception " + e.getCause());
                     return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
@@ -922,15 +944,12 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
 
                 try {
                     Region region = parseRegion(arguments);
-                    iBeaconManager.startRangingBeaconsInRegion(region);
+                    iBeaconManager.startRangingBeacons(region);
 
                     PluginResult result = new PluginResult(PluginResult.Status.OK);
                     result.setKeepCallback(true);
                     return result;
 
-                } catch (RemoteException e) {
-                    Log.e(TAG, "'startRangingBeaconsInRegion' service error: " + e.getCause());
-                    return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
                 } catch (Exception e) {
                     Log.e(TAG, "'startRangingBeaconsInRegion' exception " + e.getCause());
                     return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
@@ -947,15 +966,12 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
 
                 try {
                     Region region = parseRegion(arguments);
-                    iBeaconManager.stopRangingBeaconsInRegion(region);
+                    iBeaconManager.stopRangingBeacons(region);
 
                     PluginResult result = new PluginResult(PluginResult.Status.OK);
                     result.setKeepCallback(true);
                     return result;
 
-                } catch (RemoteException e) {
-                    Log.e(TAG, "'stopRangingBeaconsInRegion' service error: " + e.getCause());
-                    return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
                 } catch (Exception e) {
                     Log.e(TAG, "'stopRangingBeaconsInRegion' exception " + e.getCause());
                     return new PluginResult(PluginResult.Status.ERROR, e.getMessage());
@@ -1546,28 +1562,15 @@ public class LocationManager extends CordovaPlugin implements BeaconConsumer {
         }
     }
 
-    //////// IBeaconConsumer implementation /////////////////////
+    /*
+     BeaconConsumer の実装（onBeaconServiceConnect / bindService / unbindService）は
+     autobind への移行で不要になったので削除した。
 
-    @Override
-    public void onBeaconServiceConnect() {
-        debugLog("Connected to IBeacon service");
-    }
-
-    @Override
-    public Context getApplicationContext() {
+     getApplicationContext だけは残す。BeaconConsumer の一部だったが、
+     createOrGetBeaconTransmitter が BeaconTransmitter を作るのに使っている。
+     */
+    private Context getApplicationContext() {
         return cordova.getActivity();
-    }
-
-    @Override
-    public void unbindService(ServiceConnection connection) {
-        debugLog("Unbind from IBeacon service");
-        cordova.getActivity().unbindService(connection);
-    }
-
-    @Override
-    public boolean bindService(Intent intent, ServiceConnection connection, int mode) {
-        debugLog("Bind to IBeacon service");
-        return cordova.getActivity().bindService(intent, connection, mode);
     }
 
 }
