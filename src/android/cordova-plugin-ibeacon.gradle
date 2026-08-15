@@ -7,7 +7,24 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.altbeacon:android-beacon-library:2.21.1'
+    /*
+     2.19 に据え置いている。2026-08-03 に 2.21.1 へ上げたが、
+     **実機でビーコンを1本も検出しなくなった**ため戻した。
+
+     症状: ranging のコールバックは毎秒来るのに結果が常に空。
+     UUID を絞らない領域でも空。権限（付近のデバイス・位置情報）は許可済みで、
+     同じ端末・同じビーコンで 2.19 のストア版は正常に測位できる。
+
+     2.21.1 は Maven Central の最新だが、CHANGELOG の 2.21.2 に
+     「Fixed broken foreground service startup on Android 15」があり、
+     **その修正はまだ公開されていない**。2.21.1 には
+     「Corrected default scan periods」も入っている。
+     上げ直すのは 2.21.2 以降が公開されてからにすること。
+
+     上げるときは必ず実機でビーコンを検出できることを確かめる。
+     ビルドが通るだけでは分からない。
+     */
+    implementation 'org.altbeacon:android-beacon-library:2.19'
 }
 
 android {
