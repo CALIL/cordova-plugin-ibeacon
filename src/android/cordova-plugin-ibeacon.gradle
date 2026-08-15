@@ -8,23 +8,21 @@ repositories {
 
 dependencies {
     /*
-     2.19 に据え置いている。2026-08-03 に 2.21.1 へ上げたが、
-     **実機でビーコンを1本も検出しなくなった**ため戻した。
+     **この版を上げ下げするときは、必ず実機でビーコンを検出できることを確かめる。**
+     ビルドが通るだけでは分からない。2026-08 の事故では CI が最後までグリーンだった。
 
-     症状: ranging のコールバックは毎秒来るのに結果が常に空。
-     UUID を絞らない領域でも空。権限（付近のデバイス・位置情報）は許可済みで、
-     同じ端末・同じビーコンで 2.19 のストア版は正常に測位できる。
+     経緯。2026-08-03 に 2.19 から 2.21.1 へ上げたところ、実機がビーコンを
+     1本も検出しなくなった。症状は ranging のコールバックが毎秒来るのに結果が
+     常に空。UUID を絞らない領域でも空。例外も警告も出ない。権限（付近のデバイス・
+     位置情報）は許可済みで、同じ端末・同じビーコンで 2.19 のストア版は動いていた。
+     2.21.2 でも直らなかったので 2.19 へ戻して復旧した。
 
-     2.21.1 は Maven Central の最新だが、CHANGELOG の 2.21.2 に
-     「Fixed broken foreground service startup on Android 15」があり、
-     **その修正はまだ公開されていない**。2.21.1 には
-     「Corrected default scan periods」も入っている。
-     上げ直すのは 2.21.2 以降が公開されてからにすること。
-
-     上げるときは必ず実機でビーコンを検出できることを確かめる。
-     ビルドが通るだけでは分からない。
+     原因は版そのものではなく、**この LocationManager.java が 2.19 で廃止された
+     手動 bind の API を使い続けていたこと**。公式の移行ガイドは
+     「Do not mix old binding methods with new autobind methods」と明記している。
+     autobind へ移してから 2.21.2 に上げ直した。
      */
-    implementation 'org.altbeacon:android-beacon-library:2.19'
+    implementation 'org.altbeacon:android-beacon-library:2.21.2'
 }
 
 android {
